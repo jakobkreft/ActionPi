@@ -1,16 +1,29 @@
 # Raspberry Pi Camera - ActionPi
-Standalone Raspberry Pi Camera with different modes of operation and also a web interface
+Transform your Raspberry Pi into a standalone, high-performing underwater action camera with a distinctive, audio-based interface.
 
-![actionpi](https://github.com/jakobkreft/ActionPi/assets/70409100/f379d3ce-c501-487c-a150-d21ae6b52ed5)
+![actionpi](https://github.com/jakobkreft/ActionPi/assets/70409100/4d721f27-44cc-42d6-9a01-f8a979829875)
 
 
-# Underwater ActionPi: An Underwater Action Camera with Raspberry Pi
+## Table of Contents
+1. [Introduction](#introduction)
+    - [Magnet Sensor and Piezo Buzzer](#magnet-sensor-and-piezo-buzzer)
+    - [Modes of Operation](#modes-of-operation)
+    - [Flask-based Web Server](#flask-based-web-server)
+2. [Prerequisites](#prerequisites)
+3. [Installation](#installation)
+    - [Install the required Python packages](#install-the-required-python-packages)
+    - [Install the required system utilities](#install-the-required-system-utilities)
+4. [Setting Up Hardware](#setting-up-hardware)
+5. [Running the Scripts](#running-the-scripts)
+6. [Setting Up the Web Server](#setting-up-the-web-server)
+7. [Using the Web Server](#using-the-web-server)
+8. [Setting Scripts to Run at Boot](#setting-scripts-to-run-at-boot)
+9. [Conclusion](#conclusion)
+10. [Contributing](#contributing)
 
 ## Introduction
 
-Underwater ActionPi is an innovative project that transforms a Raspberry Pi into a high-functioning underwater action camera. Designed and developed to capture images, record videos, and execute timelapse recordings in an underwater environment. 
-
-The standout feature of this underwater action camera is its intuitive interface. The system can be operated via two different modes. The first one involves the use of a magnet sensor and a piezo buzzer, while the second utilizes a Flask-based web server. 
+The ActionPi project transforms your Raspberry Pi into an efficient underwater action camera capable of capturing images, recording videos, and conducting timelapse recordings. This camera system is unique for its dual modes of operation: an intuitive physical interface using a magnet sensor and a piezo buzzer, and a user-friendly, Flask-based web server.
 
 ### Magnet Sensor and Piezo Buzzer
 
@@ -38,16 +51,6 @@ As an alternative to the physical magnet sensor interface, the system also suppo
 Underwater ActionPi combines advanced technology with user-friendly interfaces, creating an efficient and enjoyable underwater action camera. Its innovative design and the convenience it offers make it a significant leap forward in the realm of underwater photography and videography. 
 
 
-## Table of Contents
-1. [Prerequisites](#prerequisites)
-2. [Installation](#installation)
-3. [Setting Up Hardware](#setting-up-hardware)
-4. [Running the Scripts](#running-the-scripts)
-5. [Setting Up the Web Server](#setting-up-the-web-server)
-6. [Using the Web Server](#using-the-web-server)
-7. [Setting Scripts to Run at Boot](#setting-scripts-to-run-at-boot)
-8. [Conclusion](#conclusion)
-9. [Contributing](#contributing)
 
 ## Prerequisites
 
@@ -111,7 +114,7 @@ sudo apt-get install libcamera-tools
 Please ensure these packages are installed correctly before proceeding. The Flask and RPi.GPIO libraries are needed to run the Python script, and the `ffmpeg` and `libcamera-tools` utilities are used within the script to interact with the camera and the video files.
 
 ## Setting Up Hardware
-![actionpi_text](https://github.com/jakobkreft/ActionPi/assets/70409100/f0000abd-131c-41b6-b6e2-8d196d90365b)
+![actionpi_text](https://github.com/jakobkreft/ActionPi/assets/70409100/ae4ca36e-cbde-4c45-91ac-ff7da78c8395)
 
 
 1. Connect your Pi Camera to the Raspberry Pi.
