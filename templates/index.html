@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ActionPi Camera</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css">
+    <style>
+        body {
+            padding: 1em;
+        }
+        .form-group {
+            margin: 1em 0;
+        }
+        .file-list {
+            list-style: none;
+            padding: 0;
+        }
+        .file-list li {
+            margin: 0.5em 0;
+        }
+    </style>
+    <script>
+        function confirmDelete() {
+            return confirm('Are you sure you want to delete?');
+        }
+    </script>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center my-4">ActionPi</h1>
+    
+        <h2>Capture Photo</h2>
+        <form method="GET" action="{{ url_for('start_photo_capture', filename='photo.jpg') }}">
+            <div class="form-group">
+                <input type="submit" class="btn btn-primary" value="Capture Photo">
+            </div>
+        </form>
+
+        <h2>Capture Timelapse</h2>
+        <form method="GET" action="{{ url_for('start_timelapse', directory='timelapse1', interval=2, duration=60) }}">
+            <div class="form-group">
+                <label for="interval">Interval (seconds):</label>
+                <input type="number" id="interval" name="interval" class="form-control" min="1" max="3600" value="2">
+            </div>
+            <div class="form-group">
+                <label for="duration">Duration (seconds):</label>
+                <input type="number" id="duration" name="duration" class="form-control" min="1" max="3600" value="60">
+            </div>
+            <input type="submit" class="btn btn-primary" value="Start Timelapse">
+        </form>
+
+        <h2>Capture Video</h2>
+        <form method="GET" action="{{ url_for('start_video_capture', filename='video.h264', duration=60) }}">
+            <div class="form-group">
+                <label for="duration">Duration (seconds):</label>
+                <input type="number" id="duration" name="duration" class="form-control" min="1" max="3600" value="60">
+            </div>
+            <input type="submit" class="btn btn-primary" value="Start Video">
+        </form>
+
+        {% for directory, files in all_files.items() %}
+            <h2 class="my-4">{{ directory }}</h2>
+            <a href="{{ url_for('download_all', directory=directory) }}" class="btn btn-success mb-2">Download All</a>
+            <form method="POST" action="{{ url_for('delete_all', directory=directory) }}" onsubmit="return confirmDelete()" class="mb-2">
+                <input type="submit" class="btn btn-danger" value="Delete All">
+            </form>
+            <ul class="file-list">
+                {% for file in files %}
+                    <li>
+                        <a href="{{ url_for('download', filepath=directory+'/'+file) }}" class="btn btn-link">{{ file }}</a>
+                        <form method="POST" action="{{ url_for('delete') }}" onsubmit="return confirmDelete()" style="display: inline-block;">
+                            <input type="hidden" name="filepath" value="{{ directory+'/'+file }}">
+                            <input type="submit" class="btn btn-sm btn-danger" value="Delete">
+                        </form>
+                    </li>
+                {% endfor %}
+            </ul>
+        {% endfor %}
+
+        <!-- Shutdown button -->
+        <form method="POST" action="{{ url_for('shutdown') }}" onsubmit="return confirm('Are you sure you want to shutdown?')" class="mb-2">
+            <input type="submit" class="btn btn-danger" value="Shutdown">
+        </form>
+
+    </div>
+
+    <!-- Bootstrap JavaScript components -->
+    <script src="https://code.jquery.com/jquery-3.2.1.slim.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.9/umd/popper.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js"></script>
+</body>
+</html>
