@@ -1,5 +1,5 @@
 # Raspberry Pi Camera - ActionPi
-Transform your Raspberry Pi into a standalone, high-performing underwater action camera with a distinctive, audio-based interface.
+Transform your Raspberry Pi into a standalone, high-performing underwater action camera with audio-based interface or a web interface.
 
 ![actionpi](https://github.com/jakobkreft/ActionPi/assets/70409100/4d721f27-44cc-42d6-9a01-f8a979829875)
 
