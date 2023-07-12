@@ -68,7 +68,7 @@ Before you start, make sure your Raspberry Pi OS is up to date, and you have Pyt
 To get started, clone this repository to your Raspberry Pi.
 
 ```bash
-git clone https://github.com/jakobkreft/ActionPi.git
+https://github.com/jakobkreft/ActionPi.git
 cd ActionPi
 ```
 
