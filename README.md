@@ -170,8 +170,8 @@ And add the following lines:
 
 ## Conclusion
 
-With ActionPi you can transform your Raspberry Pi into an action camera. You can even use it underwater with the use of the magnet. Or simply use your phone or any web browser to control the camera.
+Transform your Raspberry Pi into a versatile action camera with ActionPi, whether for underwater use with a magnet or controlled via any web browser.
 
 ## Contributing
 
-Contributions to improve Underwater ActionPi are welcome. Feel free to open an issue or submit a pull request.
+We welcome any contributions to improve ActionPi. Feel free to open an issue or submit a pull request.
