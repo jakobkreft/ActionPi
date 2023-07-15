@@ -4,10 +4,17 @@ import time
 import os
 from datetime import datetime
 import sys
+from PIL import Image
 
 # Add a base directory for your paths
 base_dir = "/home/pi/camera/"
 
+# Set a directory for thumbnails
+thumbnail_dir = base_dir + "thumbnails/"
+
+# Ensure the thumbnails directory exists
+if not os.path.exists(thumbnail_dir):
+    os.mkdir(thumbnail_dir)
 
 # Pin configurations
 BUTTON_PIN = 10
@@ -150,6 +157,17 @@ def capture_photo():
 
     # Capture the photo
     os.system(f"libcamera-still -o {filename}")
+
+    # Create directories if they don't exist
+    photos_thumbnail_dir = thumbnail_dir + "photos/"
+    if not os.path.exists(photos_thumbnail_dir):
+        os.mkdir(photos_thumbnail_dir)
+
+    # Create a thumbnail
+    with Image.open(filename) as img:
+        img.thumbnail((128, 128))  # Resize image in-place
+        img.save(photos_thumbnail_dir + os.path.basename(filename))  # Save thumbnail
+
     # Set flag to stop playing melody
     play_melody_flag = False
 
@@ -176,6 +194,17 @@ def record_video(duration):
     # Delete the original .h264 file
     os.remove(filename_h264)
 
+    # Create directories if they don't exist
+    videos_thumbnail_dir = thumbnail_dir + "videos/"
+    if not os.path.exists(videos_thumbnail_dir):
+        os.mkdir(videos_thumbnail_dir)
+
+    # Create a thumbnail
+    os.system(f"ffmpeg -i {filename_mp4} -ss 00:00:01 -vframes 1 {videos_thumbnail_dir + os.path.basename(filename_mp4)}.jpg")
+    with Image.open(videos_thumbnail_dir + os.path.basename(filename_mp4) + ".jpg") as img:
+        img.thumbnail((128, 128))  # Resize image in-place
+        img.save(videos_thumbnail_dir + os.path.basename(filename_mp4) + ".jpg")  # Overwrite the full-size frame with thumbnail
+
     # Set flag to stop playing melody
     play_melody_flag = False
 
@@ -199,6 +228,17 @@ def capture_timelapse(duration):
 
     # Capture the timelapse
     os.system(f"libcamera-still -t {duration * 60000} --timelapse 2000 --framestart 1 -o {filename}")
+
+    # Create directories if they don't exist
+    timelapse_thumbnail_dir = thumbnail_dir + "timelapse/"
+    if not os.path.exists(timelapse_thumbnail_dir):
+        os.mkdir(timelapse_thumbnail_dir)
+
+    # Create a thumbnail from the first image in the timelapse
+    first_image_filename = os.path.join(foldername, "image0001.jpg")
+    with Image.open(first_image_filename) as img:
+        img.thumbnail((128, 128))  # Resize image in-place
+        img.save(timelapse_thumbnail_dir + os.path.basename(foldername) + ".jpg")  # Save thumbnail for timelapse
 
     # Set flag to stop playing melody
     play_melody_flag = False
