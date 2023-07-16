@@ -6,6 +6,8 @@ import threading
 from datetime import datetime
 from subprocess import call
 from PIL import Image
+import psutil
+
 
 app = Flask(__name__)
 
@@ -29,7 +31,12 @@ def index():
             all_files[directory] = files
         else:
             all_files[directory] = []
-    return render_template('index.html', all_files=all_files)
+
+    temperature = cpu_temperature()
+    disk_space = disk_usage()
+
+    return render_template('index.html', all_files=all_files, temperature=temperature, disk_space=disk_space)
+
 
 @app.route('/thumbnail/<path:filepath>')
 def get_thumbnail(filepath):
@@ -231,6 +238,26 @@ def delete_all(directory):
             shutil.rmtree(thumbnail_dir_path)
         
     return redirect(url_for('index'))
+
+
+@app.route('/cpu_temperature')
+def cpu_temperature():
+    try:
+        temperature = psutil.sensors_temperatures()['cpu_thermal'][0].current
+        temperature = round(temperature, 1)  # round to one decimal place
+    except (KeyError, IndexError):
+        temperature = "N/A"
+    return str(temperature)
+
+@app.route('/disk_usage')
+def disk_usage():
+    total, used, free = shutil.disk_usage('/')
+    # Convert from bytes to gigabytes
+    total_gb = round(total / (2**30), 1)
+    used_gb = round(used / (2**30), 1)
+    free_gb = round(free / (2**30), 1)
+    return {"total_gb": total_gb, "used_gb": used_gb, "free_gb": free_gb}
+
 
 
 @app.route('/shutdown', methods=['POST'])

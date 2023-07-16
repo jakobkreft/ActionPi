@@ -200,13 +200,15 @@ def record_video(duration):
         os.mkdir(videos_thumbnail_dir)
 
     # Create a thumbnail
-    os.system(f"ffmpeg -i {filename_mp4} -ss 00:00:01 -vframes 1 {videos_thumbnail_dir + os.path.basename(filename_mp4)}.jpg")
-    with Image.open(videos_thumbnail_dir + os.path.basename(filename_mp4) + ".jpg") as img:
+    thumbnail_filename = os.path.splitext(os.path.basename(filename_mp4))[0] + ".jpg"
+    os.system(f"ffmpeg -i {filename_mp4} -ss 00:00:01 -vframes 1 {videos_thumbnail_dir + thumbnail_filename}")
+    with Image.open(videos_thumbnail_dir + thumbnail_filename) as img:
         img.thumbnail((128, 128))  # Resize image in-place
-        img.save(videos_thumbnail_dir + os.path.basename(filename_mp4) + ".jpg")  # Overwrite the full-size frame with thumbnail
+        img.save(videos_thumbnail_dir + thumbnail_filename)  # Overwrite the full-size frame with thumbnail
 
     # Set flag to stop playing melody
     play_melody_flag = False
+
 
 
 # Function to capture a timelapse with melody
@@ -227,10 +229,10 @@ def capture_timelapse(duration):
     filename = foldername + "/image%04d.jpg"
 
     # Capture the timelapse
-    os.system(f"libcamera-still -t {duration * 60000} --timelapse 2000 --framestart 1 -o {filename}")
+    os.system(f"libcamera-still -t {duration * 60000} --timelapse 1000 --framestart 1 -o {filename}")
 
     # Create directories if they don't exist
-    timelapse_thumbnail_dir = thumbnail_dir + "timelapse/"
+    timelapse_thumbnail_dir = thumbnail_dir + "timelapses/"
     if not os.path.exists(timelapse_thumbnail_dir):
         os.mkdir(timelapse_thumbnail_dir)
 
