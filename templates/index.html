@@ -1,130 +1,149 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>ActionPi Camera</title>
-    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        body {
-            padding: 1em;
-        }
-        .form-group {
-            margin: 1em 0;
-        }
-        .file-list {
-            list-style: none;
-            padding: 0;
-        }
-        .file-list li {
-            margin: 0.5em 0;
-        }
-        .thumbnail-container {
-            display: flex;
-            align-items: center;
-        }
-        .thumbnail-container img {
-            max-width: 100px;
-            height: auto;
-            margin-right: 10px;
-        }
-    </style>
-    <script>
-        function confirmDelete() {
-            return confirm('Are you sure you want to delete?');
-        }
-    </script>
+    <meta charset="utf-8">
+    <title>ActionPi</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#0e1116">
+    <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-    <div class="container">
-        <h1 class="text-center my-4">ActionPi</h1>
+    <header class="topbar">
+        <div class="brand">
+            <span class="logo">◉</span> ActionPi
+        </div>
+        <div class="topbar-right">
+            <span id="conn" class="badge badge-idle">connecting…</span>
+        </div>
+    </header>
 
-    
-        <div class="row">
-            <div class="col-md-4">
-                <h2>Capture Photo</h2>
-                <form method="GET" action="{{ url_for('start_photo_capture', filename='photo.jpg') }}">
-                    <div class="form-group">
-                        <input type="submit" class="btn btn-primary" value="Capture Photo">
-                    </div>
-                </form>
+    <main>
+        <!-- System status -->
+        <section class="stats" id="stats">
+            <div class="stat">
+                <span class="stat-label">Temp</span>
+                <span class="stat-value" id="stat-temp">–</span>
             </div>
-            <div class="col-md-4">
-                <h2>Capture Timelapse</h2>
-                <form method="GET" action="{{ url_for('start_timelapse', directory='timelapse1', interval=2, duration=60) }}">
-                    <div class="form-group">
-                        <label for="interval">Interval (seconds):</label>
-                        <input type="number" id="interval" name="interval" class="form-control" min="1" max="3600" value="2">
-                    </div>
-                    <div class="form-group">
-                        <label for="duration">Duration (seconds):</label>
-                        <input type="number" id="duration" name="duration" class="form-control" min="1" max="3600" value="60">
-                    </div>
-                    <input type="submit" class="btn btn-primary" value="Start Timelapse">
-                </form>
+            <div class="stat stat-grow">
+                <span class="stat-label">Storage <span id="stat-disk-text">–</span></span>
+                <div class="bar"><div class="bar-fill" id="stat-disk-bar"></div></div>
             </div>
-            <div class="col-md-4">
-                <h2>Capture Video</h2>
-                <form method="GET" action="{{ url_for('start_video_capture', filename='video.h264', duration=60) }}">
-                    <div class="form-group">
-                        <label for="duration">Duration (seconds):</label>
-                        <input type="number" id="duration" name="duration" class="form-control" min="1" max="3600" value="60">
-                    </div>
-                    <input type="submit" class="btn btn-primary" value="Start Video">
-                </form>
+        </section>
+
+        <!-- Live capture banner -->
+        <section id="live" class="live hidden">
+            <div class="live-info">
+                <div class="live-mode" id="live-mode">Recording</div>
+                <div class="live-time" id="live-time">–</div>
+                <div class="live-sub" id="live-sub"></div>
             </div>
+            <button class="btn btn-stop" id="btn-stop">Stop</button>
+        </section>
+
+        <!-- Capture controls -->
+        <section class="panel" id="capture-panel">
+            <div class="segmented">
+                <button class="seg active" data-mode="photo">Photo</button>
+                <button class="seg" data-mode="video">Video</button>
+                <button class="seg" data-mode="timelapse">Timelapse</button>
+            </div>
+
+            <div class="mode-body" id="mode-photo">
+                <p class="hint">Capture a single still image.</p>
+            </div>
+
+            <div class="mode-body hidden" id="mode-video">
+                <label>Duration
+                    <span class="row">
+                        <input type="number" id="video-duration" min="1" value="1">
+                        <select id="video-unit">
+                            <option value="60" selected>minutes</option>
+                            <option value="1">seconds</option>
+                            <option value="3600">hours</option>
+                        </select>
+                    </span>
+                </label>
+            </div>
+
+            <div class="mode-body hidden" id="mode-timelapse">
+                <label>Interval
+                    <span class="row">
+                        <input type="number" id="tl-interval" min="1" value="5">
+                        <span class="unit">seconds</span>
+                    </span>
+                </label>
+                <label>Duration
+                    <span class="row">
+                        <input type="number" id="tl-duration" min="1" value="60">
+                        <select id="tl-unit">
+                            <option value="60" selected>minutes</option>
+                            <option value="3600">hours</option>
+                        </select>
+                    </span>
+                </label>
+                <p class="hint" id="tl-estimate"></p>
+            </div>
+
+            <button class="btn btn-primary btn-start" id="btn-start">Start</button>
+        </section>
+
+        <!-- Gallery -->
+        <section class="gallery-head">
+            <div class="tabs" id="tabs">
+                <button class="tab active" data-filter="all">All</button>
+                <button class="tab" data-filter="photo">Photos</button>
+                <button class="tab" data-filter="video">Videos</button>
+                <button class="tab" data-filter="timelapse">Timelapses</button>
+            </div>
+            <button class="btn btn-ghost btn-sm" id="btn-select">Select</button>
+        </section>
+
+        <div class="select-toolbar hidden" id="select-toolbar">
+            <span id="select-count">0 selected</span>
+            <div class="spacer"></div>
+            <button class="btn btn-sm" id="btn-dl-selected">Download</button>
+            <button class="btn btn-sm btn-danger" id="btn-del-selected">Delete</button>
+            <button class="btn btn-sm btn-ghost" id="btn-cancel-select">Cancel</button>
         </div>
 
-        <hr>
+        <section class="grid" id="gallery"></section>
+        <p class="empty hidden" id="gallery-empty">No media yet.</p>
+    </main>
 
-        {% for directory, files in all_files.items() %}
-            <h2 class="my-4">{{ directory }}</h2>
-            <div class="btn-group mb-2">
-                <a href="{{ url_for('download_all', directory=directory) }}" class="btn btn-success">Download All</a>
-                <form method="POST" action="{{ url_for('delete_all', directory=directory) }}" onsubmit="return confirmDelete()">
-                    <input type="submit" class="btn btn-danger" value="Delete All">
-                </form>
-            </div>
-            <ul class="file-list">
-            {% for file in files %}
-                <li class="d-flex align-items-center justify-content-between">
-                    <div class="thumbnail-container">
-                        {% set thumbnail_file = file if file.endswith('.jpg') else (file if directory == 'timelapses' else file.replace('.mp4', '')) %}
-                        <a href="{{ url_for('download', filepath=directory+'/'+file) }}">
-                            <img src="{{ url_for('get_thumbnail', filepath='thumbnails/' + directory + '/' + thumbnail_file + ('' if file.endswith('.jpg') else '.jpg')) }}" alt="Thumbnail">
-                        </a>
-                        <a href="{{ url_for('download', filepath=directory+'/'+file) }}">{{ file }}</a>
-                    </div>
-                    <form method="POST" action="{{ url_for('delete') }}" onsubmit="return confirmDelete()" class="ml-3">
-                        <input type="hidden" name="filepath" value="{{ directory+'/'+file }}">
-                        <input type="submit" class="btn btn-sm btn-danger" value="Delete">
-                    </form>
-                </li>
-            {% endfor %}
-            </ul>
-        {% endfor %}
+    <footer class="footer">
+        <button class="btn btn-ghost btn-sm" id="btn-reboot">Reboot</button>
+        <button class="btn btn-ghost btn-sm btn-danger" id="btn-shutdown">Shutdown</button>
+    </footer>
 
-        <!-- Shutdown button -->
-        <hr>
-
-
-        <h2>System Status</h2>
-        <div class="row">
-            <div class="col-6">
-                <p><strong>CPU Temperature:</strong> {{ temperature }}°C</p>
-            </div>
-            <div class="col-6">
-                <p><strong>Disk Usage:</strong> {{ disk_space['used_gb'] }} / {{ disk_space['total_gb'] }} GB, Free: {{ disk_space['free_gb'] }} GB </p>
-            </div>
+    <!-- Lightbox / viewer -->
+    <div class="modal hidden" id="viewer">
+        <div class="modal-bar">
+            <span id="viewer-title"></span>
+            <div class="spacer"></div>
+            <a class="btn btn-sm" id="viewer-download">Download</a>
+            <button class="btn btn-sm btn-danger" id="viewer-delete">Delete</button>
+            <button class="btn btn-sm btn-ghost" id="viewer-close">✕</button>
         </div>
-
-        <form method="POST" action="{{ url_for('shutdown') }}" onsubmit="return confirm('Are you sure you want to shutdown?')" class="mb-2">
-            <input type="submit" class="btn btn-danger" value="Shutdown">
-        </form>
+        <button class="nav nav-prev" id="viewer-prev">‹</button>
+        <div class="modal-content" id="viewer-content"></div>
+        <button class="nav nav-next" id="viewer-next">›</button>
     </div>
 
-    <!-- Bootstrap JavaScript components -->
-    <script src="https://code.jquery.com/jquery-3.2.1.slim.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.9/umd/popper.min.js"></script>
-    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js"></script>
+    <!-- Timelapse frames -->
+    <div class="modal hidden" id="tlview">
+        <div class="modal-bar">
+            <span id="tlview-title"></span>
+            <div class="spacer"></div>
+            <a class="btn btn-sm" id="tlview-download">Download all</a>
+            <button class="btn btn-sm btn-ghost" id="tlview-close">✕</button>
+        </div>
+        <div class="modal-content modal-scroll">
+            <div class="grid grid-dense" id="tlview-grid"></div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="/static/js/app.js"></script>
 </body>
 </html>

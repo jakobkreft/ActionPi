@@ -1,295 +1,364 @@
-import RPi.GPIO as GPIO
+"""ActionPi camera controller.
+
+All camera work runs in a background thread so the web request never blocks.
+There is exactly one camera, so there is at most one active capture at a time.
+The current state is kept in memory and mirrored to ``state.json`` so it can be
+recovered if the server restarts while a capture was interrupted.
+
+The real capture commands (``libcamera-still`` / ``libcamera-vid`` / ``ffmpeg``)
+are the ones already proven on the Pi.  When ``libcamera-still`` is not present
+(e.g. running on a laptop) the controller switches to a mock mode that produces
+placeholder media, so the whole app can be developed and tested off-device.
+"""
+
+import json
+import os
+import shutil
+import signal
+import subprocess
 import threading
 import time
-import os
 from datetime import datetime
-import sys
-from PIL import Image
 
-# Add a base directory for your paths
-base_dir = "/home/pi/camera/"
+# Longest-edge size for generated thumbnails (px).
+THUMBNAIL_SIZE = 400
 
-# Set a directory for thumbnails
-thumbnail_dir = base_dir + "thumbnails/"
+# Sub-directories, relative to the base directory.
+PHOTOS = "photos"
+VIDEOS = "videos"
+TIMELAPSES = "timelapses"
+KINDS = (PHOTOS, VIDEOS, TIMELAPSES)
 
-# Ensure the thumbnails directory exists
-if not os.path.exists(thumbnail_dir):
-    os.mkdir(thumbnail_dir)
 
-# Pin configurations
-BUTTON_PIN = 10
-BUZZER_PIN = 11
+def _log(msg):
+    print(f"[camera] {msg}", flush=True)
 
-# Note frequencies
-notes = {
-    'C': 261.63,
-    'D': 293.66,
-    'E': 329.63,
-    'F': 349.23,
-    'G': 392,
-    'A': 440,
-    'B': 493.88,
-    'C2': 523.25,
-    'R': 1  # Rest
-}
 
-# Tunes for different modes with different timings
-tunes = {
-    "photo": [('D', 0.4), ('F', 0.4), ('A', 0.4)],
-    "timelapse": [('D', 0.3), ('F', 0.1), ('A', 0.3), ('F', 0.1)],
-    "video": [('C', 0.2), ('D', 0.2), ('E', 0.2)],
-    "shutdown": [('G', 0.3), ('C2', 0.3)],
-}
+# --------------------------------------------------------------------------- #
+# Thumbnail helpers (shared by the controller and by on-demand generation in   #
+# the web server, so old media without thumbnails still shows up).             #
+# --------------------------------------------------------------------------- #
 
-# State variables
-selected_mode = None
-button_pressed = threading.Event()
+def make_image_thumbnail(src, dst, size=THUMBNAIL_SIZE):
+    """Create a thumbnail of an image. Returns True on success."""
+    from PIL import Image
 
-# Set up GPIO
-GPIO.setmode(GPIO.BOARD)
-GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
-GPIO.setup(BUZZER_PIN, GPIO.OUT)
+    try:
+        with Image.open(src) as img:
+            img = img.convert("RGB")
+            img.thumbnail((size, size))
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            img.save(dst, "JPEG", quality=75)
+        return True
+    except Exception as exc:  # noqa: BLE001 - never let a bad file break the app
+        _log(f"thumbnail failed for {src}: {exc}")
+        return False
 
-# Initialize PWM for the buzzer
-p = GPIO.PWM(BUZZER_PIN, 100)
-p.start(1)
-p.ChangeDutyCycle(0) # stop the buzzer initially
 
-# Function to play a note
-def play_note(note, duration):
-    frequency = notes.get(note, 1)
-    p.ChangeFrequency(frequency)
-    p.ChangeDutyCycle(90 if note != 'R' else 0)  # Make rest notes silent
-    time.sleep(duration)
-
-# Function to play a beep and pause at the beginning
-def initial_beep():
-    while not button_pressed.is_set():
-        play_note('A', 0.5)
-        p.ChangeDutyCycle(0)
-        time.sleep(0.5)
-
-# Function to play a tune
-def play_tune(mode, tune):
-    global selected_mode
-    start_time = time.time()
-    p.ChangeDutyCycle(0)  # stop the buzzer before starting the tune
-    time.sleep(1)  # delay between tunes
-    while True:
-        for note, duration in tune:
-            if button_pressed.is_set():
-                button_pressed.clear()
-                selected_mode = mode
-                return True
-            play_note(note, duration)
-        if time.time() - start_time >= 6:  # 10 seconds to decide
-            break
-    p.ChangeDutyCycle(0)  # stop the buzzer after finishing the tune
+def make_video_thumbnail(src, dst, size=THUMBNAIL_SIZE):
+    """Grab a frame from a video and turn it into a thumbnail."""
+    if not shutil.which("ffmpeg"):
+        return False
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    # Try a frame ~0.5s in; fall back to the very first frame for short clips.
+    for seek in ("00:00:00.5", "00:00:00"):
+        proc = subprocess.run(
+            [
+                "ffmpeg", "-y", "-loglevel", "error", "-ss", seek, "-i", src,
+                "-vframes", "1", "-vf", f"scale={size}:-1", dst,
+            ],
+            capture_output=True,
+        )
+        if proc.returncode == 0 and os.path.exists(dst):
+            return True
     return False
 
 
-def recording_duration():
-    duration_index = 0  # index 0-7 maps to 1, 2, 4, 8, 16, 32, 64, 128 minutes
-    while True:
-        duration = 2**duration_index
-        print(f"Set recording time to {duration} minute(s)")
-        start_time = time.time()
-        while time.time() - start_time < 10:  # 10 seconds to decide
-            # Number of short beeps
-            for i in range(duration_index + 1):
-                if button_pressed.is_set():
-                    button_pressed.clear()
-                    duration_index = (duration_index + 1) % 8  # Loop back to 0 after reaching 7
-                    break  # Break the inner loop
-                play_note('A', 0.1)  # Short beep
-                p.ChangeDutyCycle(0)  # Short pause
-                time.sleep(0.1)
+# --------------------------------------------------------------------------- #
+# Camera controller                                                            #
+# --------------------------------------------------------------------------- #
+
+class CameraController:
+    def __init__(self, base_dir):
+        self.base_dir = base_dir
+        self.thumb_dir = os.path.join(base_dir, "thumbnails")
+        self.state_file = os.path.join(base_dir, "state.json")
+
+        # Real hardware if libcamera is installed, otherwise mock for dev.
+        self.mock = os.environ.get("ACTIONPI_MOCK") == "1" or shutil.which("libcamera-still") is None
+
+        self._lock = threading.RLock()
+        self._proc = None            # subprocess.Popen of the active capture
+        self._job = None             # dict describing the active job
+        self._state = {"state": "idle"}
+
+        for kind in KINDS:
+            os.makedirs(os.path.join(base_dir, kind), exist_ok=True)
+            os.makedirs(os.path.join(self.thumb_dir, kind), exist_ok=True)
+
+        if self.mock:
+            _log("libcamera not found -> running in MOCK mode (placeholder media)")
+
+        self._recover()
+
+    # -- public API --------------------------------------------------------- #
+
+    def status(self):
+        """Thread-safe snapshot of the current state for the web layer."""
+        with self._lock:
+            snap = dict(self._state)
+        snap["server_time"] = time.time()
+        snap["mock"] = self.mock
+        return snap
+
+    def is_busy(self):
+        with self._lock:
+            return self._state.get("state") != "idle"
+
+    def start_photo(self):
+        return self._start("photo")
+
+    def start_video(self, duration):
+        duration = self._clamp(duration, 1, 24 * 3600)
+        return self._start("video", duration=duration)
+
+    def start_timelapse(self, interval, duration):
+        interval = self._clamp(interval, 1, 3600)
+        duration = self._clamp(duration, interval, 30 * 24 * 3600)
+        return self._start("timelapse", duration=duration, interval=interval)
+
+    def stop(self):
+        """Gracefully stop the active capture (SIGINT lets libcamera finalise)."""
+        with self._lock:
+            proc = self._proc
+        if proc and proc.poll() is None:
+            try:
+                proc.send_signal(signal.SIGINT)
+            except Exception as exc:  # noqa: BLE001
+                _log(f"stop failed: {exc}")
+        return self.status()
+
+    # -- capture orchestration --------------------------------------------- #
+
+    def _start(self, mode, duration=None, interval=None):
+        with self._lock:
+            if self._state.get("state") != "idle":
+                # Busy: starting is idempotent, just report what is running.
+                return self.status()
+
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            now = time.time()
+            job = {"mode": mode, "stamp": stamp}
+
+            if mode == "photo":
+                name = f"photo_{stamp}.jpg"
+                job["file"] = os.path.join(self.base_dir, PHOTOS, name)
+                job["name"] = name
+                cmd = ["libcamera-still", "-o", job["file"]]
+                mock_seconds = 1
+                ends_at = None
+            elif mode == "video":
+                stem = f"video_{stamp}"
+                job["h264"] = os.path.join(self.base_dir, VIDEOS, stem + ".h264")
+                job["mp4"] = os.path.join(self.base_dir, VIDEOS, stem + ".mp4")
+                job["name"] = stem + ".mp4"
+                cmd = [
+                    "libcamera-vid", "-t", str(duration * 1000),
+                    "--framerate", "24", "--width", "1920", "--height", "1080",
+                    "-o", job["h264"],
+                ]
+                mock_seconds = duration
+                ends_at = now + duration
+            elif mode == "timelapse":
+                folder_name = f"timelapse_{stamp}"
+                job["folder"] = os.path.join(self.base_dir, TIMELAPSES, folder_name)
+                job["name"] = folder_name
+                os.makedirs(job["folder"], exist_ok=True)
+                pattern = os.path.join(job["folder"], "image%04d.jpg")
+                cmd = [
+                    "libcamera-still", "-t", str(duration * 1000),
+                    "--timelapse", str(interval * 1000), "--framestart", "1",
+                    "-o", pattern,
+                ]
+                mock_seconds = duration
+                ends_at = now + duration
+                job["interval"] = interval
             else:
-                # Long pause
-                p.ChangeDutyCycle(0)
-                time.sleep(0.7)
-                continue  # Continue if the inner loop wasn't broken
-            break  # Break the outer loop
-        else:
-            p.ChangeDutyCycle(0)
-            return duration  # Return the recording time in minutes
+                raise ValueError(f"unknown mode {mode}")
 
-# Add shutdown function
-def shutdown():
-    start_time = time.time()
-    while time.time() - start_time < 10:  # 10 seconds to confirm
-        if button_pressed.is_set():
-            p.ChangeDutyCycle(0)
-            os.system("sudo shutdown -h now")  # shutdown the Pi
-            return  # Exit function in case shutdown does not happen immediately
-        play_note('A', 0.2)  # Single beep
-        p.ChangeDutyCycle(0)  # Pause
-        time.sleep(0.8)  # Wait for the remainder of the second
-    p.ChangeDutyCycle(0)  # Make rest notes silent
-    p.stop()  # Stop PWM output
-    GPIO.cleanup()  # Cleanup GPIO channels
-    sys.exit(0)  # Exit the Python script if the button is not pressed within 10 seconds
+            if self.mock:
+                cmd = ["sleep", str(mock_seconds)]
 
-# Function to play melody
-def play_melody():
-    global play_melody_flag
-    melody = [('C', 0.2), ('D', 0.2), ('E', 0.2), ('F', 0.2), ('G', 0.2), ('A', 0.15), ('C2', 0.1)]
-    while play_melody_flag:
-        p.ChangeDutyCycle(0)  # Make rest notes silent
-        time.sleep(2)
-        for note, duration in melody:
-            play_note(note, duration)
+            _log(f"start {mode}: {' '.join(cmd)}")
+            try:
+                self._proc = subprocess.Popen(cmd)
+            except FileNotFoundError as exc:
+                _log(f"cannot start capture: {exc}")
+                self._proc = None
+                return self.status()
 
+            self._job = job
+            self._state = {
+                "state": "recording",
+                "mode": mode,
+                "name": job["name"],
+                "started_at": now,
+                "ends_at": ends_at,
+                "duration": duration,
+                "interval": interval,
+            }
+            self._persist()
 
+            worker = threading.Thread(target=self._worker, args=(self._proc, job), daemon=True)
+            worker.start()
+            return self.status()
 
-def capture_photo():
-    global play_melody_flag
-    # Set flag to start playing melody
-    play_melody_flag = True
-    # Start melody in a separate thread
-    threading.Thread(target=play_melody).start()
-    # Create directory if it doesn't exist
-    if not os.path.exists(base_dir + "photos"):
-        os.mkdir(base_dir + "photos")
-    
-    # Generate the filename
-    filename = datetime.now().strftime(base_dir + "photos/photo_%Y%m%d_%H%M%S.jpg")
+    def _worker(self, proc, job):
+        """Wait for the capture to finish, then post-process and go idle."""
+        proc.wait()
+        with self._lock:
+            if self._job is not job:
+                return  # a newer job replaced this one; nothing to do
+            self._state["state"] = "processing"
+            self._persist()
 
-    # Capture the photo
-    os.system(f"libcamera-still -o {filename}")
+        try:
+            if self.mock:
+                self._mock_output(job)
+            elif job["mode"] == "video":
+                self._convert_video(job)
+            self._make_thumbnail(job)
+        except Exception as exc:  # noqa: BLE001
+            _log(f"post-processing failed: {exc}")
 
-    # Create directories if they don't exist
-    photos_thumbnail_dir = thumbnail_dir + "photos/"
-    if not os.path.exists(photos_thumbnail_dir):
-        os.mkdir(photos_thumbnail_dir)
+        with self._lock:
+            if self._job is job:
+                self._proc = None
+                self._job = None
+                self._state = {"state": "idle"}
+                self._persist()
+        _log(f"finished {job['mode']}: {job['name']}")
 
-    # Create a thumbnail
-    with Image.open(filename) as img:
-        img.thumbnail((128, 128))  # Resize image in-place
-        img.save(photos_thumbnail_dir + os.path.basename(filename))  # Save thumbnail
+    def _convert_video(self, job):
+        subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-i", job["h264"], "-vcodec", "copy", job["mp4"]],
+            check=False,
+        )
+        if os.path.exists(job["mp4"]) and os.path.exists(job["h264"]):
+            os.remove(job["h264"])
 
-    # Set flag to stop playing melody
-    play_melody_flag = False
+    def _make_thumbnail(self, job):
+        mode = job["mode"]
+        if mode == "photo":
+            dst = os.path.join(self.thumb_dir, PHOTOS, job["name"])
+            make_image_thumbnail(job["file"], dst)
+        elif mode == "video":
+            dst = os.path.join(self.thumb_dir, VIDEOS, job["name"].replace(".mp4", ".jpg"))
+            make_video_thumbnail(job["mp4"], dst)
+        elif mode == "timelapse":
+            first = self._first_timelapse_image(job["folder"])
+            if first:
+                dst = os.path.join(self.thumb_dir, TIMELAPSES, job["name"] + ".jpg")
+                make_image_thumbnail(first, dst)
 
-def record_video(duration):
-    global play_melody_flag
-    # Set flag to start playing melody
-    play_melody_flag = True
-    # Start melody in a separate thread
-    threading.Thread(target=play_melody).start()
-    # Create directory if it doesn't exist
-    if not os.path.exists(base_dir + "videos"):
-        os.mkdir(base_dir + "videos")
+    @staticmethod
+    def _first_timelapse_image(folder):
+        try:
+            images = sorted(f for f in os.listdir(folder) if f.lower().endswith(".jpg"))
+        except FileNotFoundError:
+            return None
+        return os.path.join(folder, images[0]) if images else None
 
-    # Generate filename
-    filename_h264 = datetime.now().strftime(base_dir + "videos/video_%Y%m%d_%H%M%S.h264")
-    filename_mp4 = filename_h264.replace('.h264', '.mp4')
+    # -- recovery ----------------------------------------------------------- #
 
-    # Record the video
-    os.system(f"libcamera-vid -t {duration * 60 * 1000} --framerate 24 --width 1920 --height 1080 -o {filename_h264}")
-    
-    # Convert the video to mp4
-    os.system(f"ffmpeg -i {filename_h264} -vcodec copy {filename_mp4}")
+    def _recover(self):
+        """On startup, finalise anything that was interrupted by a restart."""
+        try:
+            with open(self.state_file) as fh:
+                saved = json.load(fh)
+        except (OSError, ValueError):
+            saved = None
 
-    # Delete the original .h264 file
-    os.remove(filename_h264)
+        if not saved or saved.get("state") == "idle":
+            self._state = {"state": "idle"}
+            return
 
-    # Create directories if they don't exist
-    videos_thumbnail_dir = thumbnail_dir + "videos/"
-    if not os.path.exists(videos_thumbnail_dir):
-        os.mkdir(videos_thumbnail_dir)
+        _log(f"recovering interrupted {saved.get('mode')} capture")
+        try:
+            mode = saved.get("mode")
+            name = saved.get("name")
+            if mode == "video" and name:
+                stem = name.replace(".mp4", "")
+                job = {
+                    "mode": "video", "name": name,
+                    "h264": os.path.join(self.base_dir, VIDEOS, stem + ".h264"),
+                    "mp4": os.path.join(self.base_dir, VIDEOS, stem + ".mp4"),
+                }
+                if os.path.exists(job["h264"]):
+                    self._convert_video(job)
+                if os.path.exists(job["mp4"]):
+                    self._make_thumbnail(job)
+            elif mode == "timelapse" and name:
+                job = {"mode": "timelapse", "name": name,
+                       "folder": os.path.join(self.base_dir, TIMELAPSES, name)}
+                self._make_thumbnail(job)
+            elif mode == "photo" and name:
+                job = {"mode": "photo", "name": name,
+                       "file": os.path.join(self.base_dir, PHOTOS, name)}
+                if os.path.exists(job["file"]):
+                    self._make_thumbnail(job)
+        except Exception as exc:  # noqa: BLE001
+            _log(f"recovery cleanup failed: {exc}")
 
-    # Create a thumbnail
-    thumbnail_filename = os.path.splitext(os.path.basename(filename_mp4))[0] + ".jpg"
-    os.system(f"ffmpeg -i {filename_mp4} -ss 00:00:01 -vframes 1 {videos_thumbnail_dir + thumbnail_filename}")
-    with Image.open(videos_thumbnail_dir + thumbnail_filename) as img:
-        img.thumbnail((128, 128))  # Resize image in-place
-        img.save(videos_thumbnail_dir + thumbnail_filename)  # Overwrite the full-size frame with thumbnail
+        self._state = {"state": "idle"}
+        self._persist()
 
-    # Set flag to stop playing melody
-    play_melody_flag = False
+    # -- helpers ------------------------------------------------------------ #
 
+    def _persist(self):
+        try:
+            with open(self.state_file, "w") as fh:
+                json.dump(self._state, fh)
+        except OSError as exc:
+            _log(f"could not persist state: {exc}")
 
+    @staticmethod
+    def _clamp(value, low, high):
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            value = low
+        return max(low, min(high, value))
 
-# Function to capture a timelapse with melody
-def capture_timelapse(duration):
+    # -- mock media generation (dev only) ---------------------------------- #
 
-    global play_melody_flag
-    # Set flag to start playing melody
-    play_melody_flag = True
-    # Start melody in a separate thread
-    threading.Thread(target=play_melody).start()
-    # Create directory if it doesn't exist
-    if not os.path.exists(base_dir + "timelapses"):
-        os.mkdir(base_dir + "timelapses")
-    
-    # Generate the folder and filename
-    foldername = datetime.now().strftime(base_dir + "timelapses/timelapse_%Y%m%d_%H%M%S")
-    os.mkdir(foldername)
-    filename = foldername + "/image%04d.jpg"
+    def _mock_output(self, job):
+        from PIL import Image, ImageDraw
 
-    # Capture the timelapse
-    os.system(f"libcamera-still -t {duration * 60000} --timelapse 1000 --framestart 1 -o {filename}")
+        def placeholder(path, text, color=(40, 90, 140)):
+            img = Image.new("RGB", (1280, 720), color)
+            ImageDraw.Draw(img).text((40, 40), text, fill=(255, 255, 255))
+            img.save(path, "JPEG", quality=80)
 
-    # Create directories if they don't exist
-    timelapse_thumbnail_dir = thumbnail_dir + "timelapses/"
-    if not os.path.exists(timelapse_thumbnail_dir):
-        os.mkdir(timelapse_thumbnail_dir)
-
-    # Create a thumbnail from the first image in the timelapse
-    first_image_filename = os.path.join(foldername, "image0001.jpg")
-    with Image.open(first_image_filename) as img:
-        img.thumbnail((128, 128))  # Resize image in-place
-        img.save(timelapse_thumbnail_dir + os.path.basename(foldername) + ".jpg")  # Save thumbnail for timelapse
-
-    # Set flag to stop playing melody
-    play_melody_flag = False
-
-# Button press handler
-def button_press(channel):
-    button_pressed.set()
-
-# Set the callback for button press
-GPIO.add_event_detect(BUTTON_PIN, GPIO.RISING, callback=button_press, bouncetime=200)
-
-
-
-
-
-
-# Modify the main loop to handle the shutdown mode
-while True:
-    # Play initial beep
-    initial_beep()
-    # Clear the initial button press event
-    button_pressed.clear()
-    for mode, tune in tunes.items():
-        print(f"Select {mode} mode")
-        if play_tune(mode, tune):
-            print(f"{mode} mode selected")
-            if mode == 'video':
-                duration = recording_duration()
-                print(f"Recording {mode} for {duration} minute(s)")
-                record_video(duration)
-            elif mode == 'photo':
-                print("Taking a photo")
-                capture_photo()
-            elif mode == 'timelapse':
-                duration = recording_duration()
-                print(f"Capturing a timelapse for {duration} minute(s)")
-                capture_timelapse(duration)
-            elif mode == 'shutdown':
-                shutdown()  # start shutdown procedure
-            p.ChangeDutyCycle(0)  # Make rest notes silent
-            time.sleep(10)  # 10 second delay after selection
-            p.ChangeDutyCycle(90)  # Resume notes
-            # Clear the button press event after each action
-            button_pressed.clear()
-            # Break out of the for loop to start the mode selection from the beginning
-            break
-        time.sleep(1)  # Short delay between modes
-
-
-# Clean up
-p.stop()
-GPIO.cleanup()
+        mode = job["mode"]
+        if mode == "photo":
+            placeholder(job["file"], f"MOCK PHOTO\n{job['stamp']}")
+        elif mode == "video":
+            made = False
+            if shutil.which("ffmpeg"):
+                r = subprocess.run(
+                    ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
+                     "-i", "testsrc=duration=3:size=640x360:rate=24", job["mp4"]],
+                    check=False,
+                )
+                made = r.returncode == 0 and os.path.exists(job["mp4"])
+            if not made:
+                open(job["mp4"], "wb").close()
+        elif mode == "timelapse":
+            count = 8  # mock: just a handful of frames to browse
+            for i in range(1, count + 1):
+                placeholder(
+                    os.path.join(job["folder"], f"image{i:04d}.jpg"),
+                    f"MOCK FRAME {i}\n{job['stamp']}",
+                    color=(30 + i * 6, 80, 120),
+                )

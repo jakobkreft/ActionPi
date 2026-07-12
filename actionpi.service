@@ -1,0 +1,16 @@
+[Unit]
+Description=ActionPi camera web server
+After=network.target
+
+[Service]
+Type=simple
+# Adjust User and paths if your Pi username is not "pi".
+User=pi
+WorkingDirectory=/home/pi/ActionPi
+Environment=ACTIONPI_DIR=/home/pi/camera
+ExecStart=/usr/bin/python3 /home/pi/ActionPi/server.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
