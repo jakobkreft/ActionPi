@@ -1,2 +1,5 @@
 Flask>=2.0
 Pillow>=8.0
+# Optional: battery monitoring on the UPS-Lite HAT (I2C). Safe to omit - the app
+# just shows no battery. On Raspberry Pi OS you can instead use apt: python3-smbus
+smbus2>=0.4

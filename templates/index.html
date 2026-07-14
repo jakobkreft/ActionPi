@@ -20,6 +20,15 @@
     <main>
         <!-- System status -->
         <section class="stats" id="stats">
+            <div class="stat hidden" id="stat-battery">
+                <span class="stat-label">Battery</span>
+                <div class="battery-row">
+                    <span class="battery"><span class="battery-fill" id="batt-fill"></span></span>
+                    <span class="stat-value" id="batt-pct">–</span>
+                    <span class="batt-bolt hidden" id="batt-bolt">⚡</span>
+                </div>
+                <span class="stat-sub" id="batt-volt"></span>
+            </div>
             <div class="stat">
                 <span class="stat-label">Temp</span>
                 <span class="stat-value" id="stat-temp">–</span>

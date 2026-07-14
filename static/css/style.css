@@ -52,11 +52,25 @@ main { max-width: 960px; margin: 0 auto; padding: 0 1rem; }
 .badge-rec { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
 
 /* Stats */
-.stats { display: flex; gap: 1rem; align-items: center; padding: 1rem 0 0.5rem; }
+.stats { display: flex; gap: 1.25rem; align-items: flex-start; padding: 1rem 0 0.5rem; flex-wrap: wrap; }
 .stat { display: flex; flex-direction: column; gap: 0.25rem; }
-.stat-grow { flex: 1; }
+.stat-grow { flex: 1; min-width: 160px; }
 .stat-label { font-size: 0.75rem; color: var(--muted); }
 .stat-value { font-weight: 600; }
+.stat-sub { font-size: 0.7rem; color: var(--muted); }
+
+/* Battery widget */
+.battery-row { display: flex; align-items: center; gap: 0.4rem; }
+.battery {
+    position: relative; width: 34px; height: 16px;
+    border: 2px solid var(--muted); border-radius: 3px; padding: 1px;
+}
+.battery::after {
+    content: ""; position: absolute; right: -5px; top: 4px;
+    width: 3px; height: 6px; background: var(--muted); border-radius: 0 2px 2px 0;
+}
+.battery-fill { display: block; height: 100%; width: 0; background: var(--ok); border-radius: 1px; transition: width 0.4s, background 0.4s; }
+.batt-bolt { color: var(--warn); }
 .bar { height: 8px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
 .bar-fill { height: 100%; width: 0; background: var(--accent); transition: width 0.4s; }
 
@@ -187,6 +201,9 @@ body.selecting .check { display: flex; }
     position: fixed; inset: 0; z-index: 50;
     background: rgba(0,0,0,0.92); display: flex; flex-direction: column;
 }
+/* Viewer sits above the timelapse-frames modal so opening a frame from a
+   timelapse shows it on top (not hidden underneath). */
+#viewer { z-index: 60; }
 .modal-bar {
     display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 0.8rem;
     background: rgba(0,0,0,0.5); border-bottom: 1px solid var(--line);

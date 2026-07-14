@@ -29,6 +29,8 @@ from camera import (
     CameraController, KINDS, PHOTOS, VIDEOS, TIMELAPSES,
     make_image_thumbnail, make_video_thumbnail,
 )
+from battery import Battery
+from wifi import WifiWatchdog
 
 BASE_DIR = os.environ.get("ACTIONPI_DIR", os.path.expanduser("~/camera"))
 os.makedirs(BASE_DIR, exist_ok=True)
@@ -36,6 +38,14 @@ THUMB_DIR = os.path.join(BASE_DIR, "thumbnails")
 
 app = Flask(__name__)
 camera = CameraController(BASE_DIR)
+battery = Battery(mock=camera.mock)
+
+# Wi-Fi reconnect watchdog is opt-in (see wifi.py / README). Never enable it on
+# a Pi that hosts its own hotspot.
+wifi_watchdog = None
+if os.environ.get("ACTIONPI_WIFI_WATCHDOG") == "1":
+    wifi_watchdog = WifiWatchdog(iface=os.environ.get("ACTIONPI_WIFI_IFACE", "wlan0"))
+    wifi_watchdog.start()
 
 
 # --------------------------------------------------------------------------- #
@@ -332,8 +342,9 @@ def _remove_thumbnail(rel):
 def system_status():
     total, used, free = shutil.disk_usage(BASE_DIR)
     gb = 2 ** 30
-    return {
+    status = {
         "cpu_temp": _cpu_temp(),
+        "battery": battery.read(),
         "disk": {
             "total_gb": round(total / gb, 1),
             "used_gb": round(used / gb, 1),
@@ -341,6 +352,9 @@ def system_status():
             "percent": round(used / total * 100) if total else 0,
         },
     }
+    if wifi_watchdog is not None:
+        status["wifi"] = wifi_watchdog.status
+    return status
 
 
 def _cpu_temp():

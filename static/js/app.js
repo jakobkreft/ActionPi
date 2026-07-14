@@ -90,6 +90,33 @@ function updateSystem(sys) {
     const bar = $("stat-disk-bar");
     bar.style.width = d.percent + "%";
     bar.style.background = d.percent > 90 ? "var(--danger)" : d.percent > 75 ? "var(--warn)" : "var(--accent)";
+    updateBattery(sys.battery);
+    updateWifi(sys.wifi);
+}
+
+function updateBattery(b) {
+    const wrap = $("stat-battery");
+    if (!b || typeof b.percent !== "number") {
+        wrap.classList.add("hidden");
+        return;
+    }
+    wrap.classList.remove("hidden");
+    $("batt-pct").textContent = b.percent + "%";
+    const fill = $("batt-fill");
+    fill.style.width = Math.max(4, Math.min(100, b.percent)) + "%";
+    fill.style.background = b.percent <= 15 ? "var(--danger)" : b.percent <= 40 ? "var(--warn)" : "var(--ok)";
+    const parts = [];
+    if (b.voltage != null) parts.push(b.voltage.toFixed(2) + " V");
+    if (b.status) parts.push(b.status);
+    $("batt-volt").textContent = parts.join(" · ");
+    const charging = b.status === "charging" || b.status === "full";
+    $("batt-bolt").classList.toggle("hidden", !charging);
+}
+
+function updateWifi(w) {
+    if (!w) return;
+    const s = w.connected === false ? "reconnecting…" : "ok";
+    $("conn").title = `Wi-Fi watchdog: ${s} · ${w.reconnects} reconnect(s)`;
 }
 
 // ------------------------------------------------------------------ //

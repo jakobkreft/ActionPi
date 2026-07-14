@@ -8,6 +8,10 @@ Type=simple
 User=pi
 WorkingDirectory=/home/pi/ActionPi
 Environment=ACTIONPI_DIR=/home/pi/camera
+# Wi-Fi auto-reconnect watchdog (client mode only!). Comment this out if the Pi
+# runs its own hotspot/AP, otherwise it would bounce your phone's connection.
+Environment=ACTIONPI_WIFI_WATCHDOG=1
+Environment=ACTIONPI_WIFI_IFACE=wlan0
 ExecStart=/usr/bin/python3 /home/pi/ActionPi/server.py
 Restart=on-failure
 RestartSec=3

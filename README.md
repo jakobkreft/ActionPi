@@ -28,14 +28,20 @@ second recording.
   Pi Zero.
 - **Self-contained**: no CDNs. All CSS/JS is served from the Pi so it works with zero
   internet access.
-- **System status**: CPU temperature and disk space; shutdown / reboot buttons.
+- **System status**: battery level (UPS-Lite HAT), CPU temperature and disk space;
+  shutdown / reboot buttons.
+- **Battery monitor**: reads percentage + voltage from a UPS-Lite fuel gauge over I2C
+  and estimates charging / discharging.
+- **Wi-Fi self-healing** (optional): disables Wi-Fi power-save and auto-reconnects if
+  the Pi's Wi-Fi client link drops.
 
 ## Hardware
 
 - A Raspberry Pi with Wi-Fi (a Pi Zero W works).
 - A camera module supported by `libcamera` (`libcamera-still` / `libcamera-vid`).
+- *(Optional)* a **UPS-Lite V1.3** battery HAT for the battery indicator.
 
-That's it — no GPIO wiring, sensors or buzzer.
+No GPIO wiring, sensors or buzzer needed.
 
 ## Install
 
@@ -49,12 +55,35 @@ cd ActionPi
 sudo apt-get update
 sudo apt-get install -y libcamera-apps ffmpeg python3-flask python3-pil
 
+# Optional: battery monitoring on the UPS-Lite HAT
+sudo apt-get install -y python3-smbus
+
 # Or, if you prefer pip:
 # pip3 install -r requirements.txt
 ```
 
 Media is stored under `~/camera` by default (`photos/`, `videos/`, `timelapses/`,
 `thumbnails/`). Override with the `ACTIONPI_DIR` environment variable.
+
+### Battery monitor (UPS-Lite)
+
+The battery indicator reads a UPS-Lite fuel gauge over I2C, so enable I2C once:
+
+```bash
+sudo raspi-config    # Interface Options -> I2C -> Enable
+```
+
+If no UPS-Lite / I2C is present the app simply hides the battery indicator.
+
+### Wi-Fi auto-reconnect (optional)
+
+Set `ACTIONPI_WIFI_WATCHDOG=1` (already set in `actionpi.service`) to have ActionPi
+disable Wi-Fi power-save and automatically reconnect the Pi's Wi-Fi **client** link if
+it drops. It uses passwordless `sudo` for a few network commands (default on Raspberry
+Pi OS).
+
+> Only use this when the Pi connects to an existing Wi-Fi network. Do **not** enable it
+> if the Pi hosts its own hotspot — it would bounce the connection your phone is on.
 
 ## Run
 
@@ -92,6 +121,8 @@ two commands.
 |------|------|
 | Camera controller — background capture, state persistence, crash recovery | `camera.py` |
 | Web server — REST API, media listing, streaming downloads, system status | `server.py` |
+| Battery monitor — UPS-Lite fuel gauge over I2C | `battery.py` |
+| Wi-Fi reconnect watchdog | `wifi.py` |
 | Single-page web UI (offline-resilient) | `templates/index.html`, `static/` |
 
 The browser polls `GET /api/status`, which returns the camera state together with the
