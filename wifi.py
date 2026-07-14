@@ -19,6 +19,10 @@ import subprocess
 import threading
 import time
 
+from logsetup import get_logger
+
+log = get_logger("wifi")
+
 
 def _run(cmd, timeout=20):
     try:
@@ -31,19 +35,20 @@ def _sudo(args):
     return ["sudo", "-n"] + args
 
 
-def _log(msg):
-    print(f"[wifi] {msg}", flush=True)
-
-
 class WifiWatchdog:
-    def __init__(self, iface="wlan0", check_interval=15, log=_log):
+    def __init__(self, iface="wlan0", check_interval=15):
         self.iface = iface
         self.interval = check_interval
-        self.log = log
         self.use_nm = shutil.which("nmcli") is not None
         self.status = {
-            "enabled": True, "connected": None,
-            "reconnects": 0, "last_event": None, "last_action": None,
+            "enabled": True,
+            "iface": iface,
+            "backend": "NetworkManager" if self.use_nm else "wpa_supplicant/dhcpcd",
+            "connected": None,
+            "gateway": None,
+            "reconnects": 0,
+            "last_event": None,
+            "last_action": None,
         }
         self._started = False
 
@@ -72,6 +77,7 @@ class WifiWatchdog:
     def connected(self):
         """A default gateway that answers ping = link up (no internet needed)."""
         gw = self._gateway()
+        self.status["gateway"] = gw
         if not gw:
             return False
         try:
@@ -116,14 +122,14 @@ class WifiWatchdog:
     # -- main loop ---------------------------------------------------------- #
 
     def _loop(self):
-        self.log(f"watchdog started (iface={self.iface}, networkmanager={self.use_nm})")
+        log.info("watchdog started (iface=%s, backend=%s)", self.iface, self.status["backend"])
         self._disable_powersave()
         fails = 0
         down_cycles = 0
         while True:
             if self.connected():
                 if self.status["connected"] is False:
-                    self.log("link back up")
+                    log.info("link back up")
                 self.status["connected"] = True
                 fails = 0
                 down_cycles = 0
@@ -139,11 +145,11 @@ class WifiWatchdog:
             if self.status["connected"] is not False:
                 self.status["connected"] = False
                 self.status["last_event"] = time.time()
-                self.log("link down - starting reconnect")
+                log.warning("link down - starting reconnect")
 
             recovered = False
             for level in range(3):
-                self.log(f"reconnect attempt (level {level})")
+                log.info("reconnect attempt (level %d)", level)
                 self._reconnect(level)
                 for _ in range(9):  # wait up to ~45s, checking every 5s
                     time.sleep(5)
@@ -158,10 +164,10 @@ class WifiWatchdog:
                 self.status["reconnects"] += 1
                 fails = 0
                 down_cycles = 0
-                self.log("reconnected")
+                log.info("reconnected")
                 time.sleep(self.interval)
             else:
                 down_cycles += 1
                 backoff = min(120, self.interval * (2 ** min(down_cycles, 3)))
-                self.log(f"still down - backing off {backoff}s")
+                log.warning("still down - backing off %ds", backoff)
                 time.sleep(backoff)

@@ -120,6 +120,7 @@
     </main>
 
     <footer class="footer">
+        <button class="btn btn-ghost btn-sm" id="btn-debug">Debug</button>
         <button class="btn btn-ghost btn-sm" id="btn-reboot">Reboot</button>
         <button class="btn btn-ghost btn-sm btn-danger" id="btn-shutdown">Shutdown</button>
     </footer>
@@ -148,6 +149,27 @@
         </div>
         <div class="modal-content modal-scroll">
             <div class="grid grid-dense" id="tlview-grid"></div>
+        </div>
+    </div>
+
+    <!-- Debug: diagnostics + live logs -->
+    <div class="modal hidden" id="debug">
+        <div class="modal-bar">
+            <span>Debug &amp; logs</span>
+            <div class="spacer"></div>
+            <select id="log-level" class="mini-select">
+                <option value="DEBUG">Debug+</option>
+                <option value="INFO" selected>Info+</option>
+                <option value="WARNING">Warnings+</option>
+                <option value="ERROR">Errors</option>
+            </select>
+            <a class="btn btn-sm" id="log-download" href="/api/logs/download">Download</a>
+            <button class="btn btn-sm btn-ghost" id="debug-close">✕</button>
+        </div>
+        <div class="modal-content modal-scroll">
+            <div id="diag-cards" class="diag-cards"></div>
+            <h3 class="logs-title">Logs</h3>
+            <div id="log-console" class="log-console"></div>
         </div>
     </div>
 

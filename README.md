@@ -30,6 +30,9 @@ second recording.
   internet access.
 - **System status**: battery level (UPS-Lite HAT), CPU temperature and disk space;
   shutdown / reboot buttons.
+- **Built-in Debug screen**: a Debug button opens live diagnostics (camera, battery,
+  Wi-Fi, system) and a streaming log console right in the browser, so you can see
+  exactly what's happening — and why, say, the battery isn't reporting — without SSH.
 - **Battery monitor**: reads percentage + voltage from a UPS-Lite fuel gauge over I2C
   and estimates charging / discharging.
 - **Wi-Fi self-healing** (optional): disables Wi-Fi power-save and auto-reconnects if
@@ -115,15 +118,31 @@ The Shutdown / Reboot buttons call `sudo shutdown` / `sudo reboot`. On Raspberry
 the default user already has passwordless sudo; otherwise add a sudoers rule for those
 two commands.
 
+## Debugging
+
+Tap **Debug** at the bottom of the page (or open it directly) to see:
+
+- **Diagnostics** cards for camera, battery, Wi-Fi and system, each with a status
+  badge. The Battery card shows precisely why it may not report — e.g. `smbus_module:
+  —` (install `python3-smbus`), `i2c_device_present: no` (enable I2C), or
+  `reads_failed` with the exact error (UPS-Lite not detected; check `i2cdetect -y 1`).
+- A **live log console** with level filtering (Debug/Info/Warnings/Errors). Unhandled
+  server errors appear here in red, with their full traceback.
+
+The same data is available as JSON at `/api/debug` and `/api/logs`, and the full log
+downloads from `/api/logs/download`. Everything is also written to the console
+(`journalctl -u actionpi -f`) and to a rotating `actionpi.log` in the media directory.
+
 ## How it works
 
 | Part | File |
 |------|------|
 | Camera controller — background capture, state persistence, crash recovery | `camera.py` |
 | Web server — REST API, media listing, streaming downloads, system status | `server.py` |
-| Battery monitor — UPS-Lite fuel gauge over I2C | `battery.py` |
+| Central logging — ring buffer + rotating file, shared by all modules | `logsetup.py` |
+| Battery monitor — UPS-Lite fuel gauge over I2C, with diagnostics | `battery.py` |
 | Wi-Fi reconnect watchdog | `wifi.py` |
-| Single-page web UI (offline-resilient) | `templates/index.html`, `static/` |
+| Single-page web UI (offline-resilient) with Debug screen | `templates/index.html`, `static/` |
 
 The browser polls `GET /api/status`, which returns the camera state together with the
 server clock and the recording's `ends_at` timestamp. The UI uses these to count down

@@ -1,5 +1,6 @@
-__pycache__/
+d__pycache__/
 *.pyc
 venv/
 .venv/
 state.json
+actionpi.log*

@@ -17,13 +17,27 @@ Design notes:
 """
 
 import os
+import platform
 import shutil
+import sys
+import time
 import zipfile
 from subprocess import Popen
 
 from flask import (
     Flask, abort, jsonify, render_template, request, send_file, Response,
 )
+from werkzeug.exceptions import HTTPException
+
+BASE_DIR = os.environ.get("ACTIONPI_DIR", os.path.expanduser("~/camera"))
+os.makedirs(BASE_DIR, exist_ok=True)
+THUMB_DIR = os.path.join(BASE_DIR, "thumbnails")
+
+# Configure logging before anything else logs, so startup is captured too.
+from logsetup import setup_logging, get_logger, get_ring, log_file_path, level_value
+
+setup_logging(BASE_DIR)
+log = get_logger("server")
 
 from camera import (
     CameraController, KINDS, PHOTOS, VIDEOS, TIMELAPSES,
@@ -32,11 +46,8 @@ from camera import (
 from battery import Battery
 from wifi import WifiWatchdog
 
-BASE_DIR = os.environ.get("ACTIONPI_DIR", os.path.expanduser("~/camera"))
-os.makedirs(BASE_DIR, exist_ok=True)
-THUMB_DIR = os.path.join(BASE_DIR, "thumbnails")
-
 app = Flask(__name__)
+log.info("ActionPi starting (base_dir=%s)", BASE_DIR)
 camera = CameraController(BASE_DIR)
 battery = Battery(mock=camera.mock)
 
@@ -46,6 +57,17 @@ wifi_watchdog = None
 if os.environ.get("ACTIONPI_WIFI_WATCHDOG") == "1":
     wifi_watchdog = WifiWatchdog(iface=os.environ.get("ACTIONPI_WIFI_IFACE", "wlan0"))
     wifi_watchdog.start()
+else:
+    log.info("wifi watchdog disabled (set ACTIONPI_WIFI_WATCHDOG=1 to enable)")
+
+
+@app.errorhandler(Exception)
+def _handle_exception(exc):
+    """Log every unhandled error (with traceback) so it shows on the Debug screen."""
+    if isinstance(exc, HTTPException):
+        return exc
+    log.exception("unhandled error handling %s %s", request.method, request.path)
+    return jsonify({"error": exc.__class__.__name__, "detail": str(exc)}), 500
 
 
 # --------------------------------------------------------------------------- #
@@ -220,6 +242,7 @@ def api_download():
     rels = request.args.getlist("path")
     if not rels:
         abort(400)
+    log.info("download: %s", ", ".join(rels))
 
     # Build the flat list of (arcname, absolute path) to include.
     entries = []
@@ -317,6 +340,8 @@ def api_delete():
             continue
         _remove_thumbnail(rel)
         deleted.append(rel)
+    if deleted:
+        log.info("deleted %d item(s): %s", len(deleted), ", ".join(deleted))
     return jsonify({"deleted": deleted})
 
 
@@ -367,14 +392,50 @@ def _cpu_temp():
 
 @app.route("/api/shutdown", methods=["POST"])
 def api_shutdown():
+    log.warning("shutdown requested from web UI")
     Popen(["sudo", "shutdown", "-h", "now"])
     return jsonify({"ok": True})
 
 
 @app.route("/api/reboot", methods=["POST"])
 def api_reboot():
+    log.warning("reboot requested from web UI")
     Popen(["sudo", "reboot"])
     return jsonify({"ok": True})
+
+
+# --------------------------------------------------------------------------- #
+# Debug & logs                                                                 #
+# --------------------------------------------------------------------------- #
+
+@app.route("/api/logs")
+def api_logs():
+    after = request.args.get("after", default=0, type=int)
+    min_level = level_value(request.args.get("level"))
+    records = get_ring().records(after_seq=after, min_level=min_level)
+    return jsonify({"records": records})
+
+
+@app.route("/api/logs/download")
+def api_logs_download():
+    resp = Response(get_ring().as_text(), mimetype="text/plain")
+    resp.headers["Content-Disposition"] = 'attachment; filename="actionpi-log.txt"'
+    return resp
+
+
+@app.route("/api/debug")
+def api_debug():
+    return jsonify({
+        "time": time.time(),
+        "python": sys.version.split()[0],
+        "platform": platform.platform(),
+        "base_dir": BASE_DIR,
+        "log_file": log_file_path(),
+        "camera": camera.diagnostics(),
+        "battery": battery.diagnostics(),
+        "wifi": wifi_watchdog.status if wifi_watchdog else {"enabled": False},
+        "system": system_status(),
+    })
 
 
 # --------------------------------------------------------------------------- #

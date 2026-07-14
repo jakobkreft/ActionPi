@@ -504,6 +504,129 @@ function setupPower() {
 }
 
 // ------------------------------------------------------------------ //
+// Debug screen (diagnostics + live logs)                             //
+// ------------------------------------------------------------------ //
+let debugTimer = null;
+let logRecords = [];
+let logSeq = 0;
+
+function setupDebug() {
+    $("btn-debug").addEventListener("click", openDebug);
+    $("debug-close").addEventListener("click", closeDebug);
+    $("log-level").addEventListener("change", renderLogs);
+}
+
+async function openDebug() {
+    $("debug").classList.remove("hidden");
+    logRecords = [];
+    logSeq = 0;
+    $("log-console").innerHTML = "";
+    await refreshDiag();
+    await pollLogs();
+    clearInterval(debugTimer);
+    let ticks = 0;
+    debugTimer = setInterval(async () => {
+        await pollLogs();
+        if (++ticks % 3 === 0) refreshDiag();
+    }, 2000);
+}
+
+function closeDebug() {
+    $("debug").classList.add("hidden");
+    clearInterval(debugTimer);
+    debugTimer = null;
+}
+
+async function refreshDiag() {
+    try {
+        const res = await api("/api/debug", {}, 6000);
+        renderDiag(await res.json());
+    } catch (e) { /* stay on last snapshot */ }
+}
+
+async function pollLogs() {
+    try {
+        const res = await api("/api/logs?after=" + logSeq, {}, 6000);
+        const recs = (await res.json()).records || [];
+        if (recs.length) {
+            for (const r of recs) {
+                logRecords.push(r);
+                if (r.seq > logSeq) logSeq = r.seq;
+            }
+            if (logRecords.length > 1200) logRecords = logRecords.slice(-1200);
+            renderLogs();
+        }
+    } catch (e) { /* ignore while disconnected */ }
+}
+
+function renderLogs() {
+    const min = { DEBUG: 10, INFO: 20, WARNING: 30, ERROR: 40 }[$("log-level").value] || 0;
+    const con = $("log-console");
+    const atBottom = con.scrollHeight - con.scrollTop - con.clientHeight < 40;
+    con.innerHTML = logRecords.filter((r) => r.levelno >= min).map(logLineHTML).join("");
+    if (atBottom) con.scrollTop = con.scrollHeight;
+}
+
+function logLineHTML(r) {
+    const t = new Date(r.ts * 1000).toLocaleTimeString();
+    let s = `<div class="log-line"><span class="lt">${t}</span> ` +
+        `<span class="lvl-${r.level}">${r.level}</span> ` +
+        `<span class="ln">${esc(r.name)}</span> ${esc(r.msg)}</div>`;
+    if (r.exc) s += `<div class="log-exc">${esc(r.exc)}</div>`;
+    return s;
+}
+
+function renderDiag(d) {
+    const b = d.battery || {};
+    let bBadge;
+    if (b.mock) bBadge = ["mock", "b-warn"];
+    else if (b.available && b.bus_open) bBadge = b.reads_ok ? ["ok", "b-ok"] : ["opened", "b-warn"];
+    else bBadge = ["unavailable", "b-err"];
+
+    const c = d.camera || {};
+    const w = d.wifi || {};
+    let wBadge;
+    if (!w.enabled) wBadge = ["disabled", "b-mute"];
+    else if (w.connected === false) wBadge = ["reconnecting", "b-err"];
+    else if (w.connected) wBadge = ["connected", "b-ok"];
+    else wBadge = ["starting", "b-warn"];
+
+    const cards = [
+        diagCard("Battery", bBadge, b),
+        diagCard("Camera", c.mock ? ["mock", "b-warn"] : ["ready", "b-ok"],
+            { mock: c.mock, state: c.state, ...(c.tools || {}) }),
+        diagCard("Wi-Fi", wBadge, w),
+        diagCard("System", ["", "b-mute"], flattenSystem(d.system)),
+        diagCard("Host", ["", "b-mute"],
+            { python: d.python, platform: d.platform, base_dir: d.base_dir, log_file: d.log_file }),
+    ];
+    $("diag-cards").innerHTML = cards.join("");
+}
+
+function flattenSystem(s) {
+    if (!s) return {};
+    const out = { cpu_temp: s.cpu_temp };
+    if (s.disk) { out.disk_free_gb = s.disk.free_gb; out.disk_used_pct = s.disk.percent; }
+    if (s.battery) { out.battery_pct = s.battery.percent; out.battery_v = s.battery.voltage; }
+    return out;
+}
+
+function diagCard(title, badge, obj) {
+    const rows = Object.entries(obj)
+        .map(([k, v]) => `<span class="k">${esc(k)}</span><span class="v">${esc(formatValue(v))}</span>`)
+        .join("");
+    const badgeHTML = badge[0] ? `<span class="diag-badge ${badge[1]}">${esc(badge[0])}</span>` : "";
+    return `<div class="diag-card"><h4>${esc(title)}${badgeHTML}</h4><div class="diag-kv">${rows}</div></div>`;
+}
+
+function formatValue(v) {
+    if (v === null || v === undefined) return "—";
+    if (typeof v === "boolean") return v ? "yes" : "no";
+    if (typeof v === "object") return JSON.stringify(v);
+    return String(v);
+}
+
+// ------------------------------------------------------------------ //
 // Utilities                                                          //
 // ------------------------------------------------------------------ //
 let toastTimer = null;
@@ -519,6 +642,11 @@ function cssEscape(s) {
     return (window.CSS && CSS.escape) ? CSS.escape(s) : s.replace(/["\\]/g, "\\$&");
 }
 
+function esc(s) {
+    return String(s).replace(/[&<>"]/g, (c) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
 // ------------------------------------------------------------------ //
 // Boot                                                               //
 // ------------------------------------------------------------------ //
@@ -529,6 +657,7 @@ function init() {
     setupViewer();
     setupTimelapseView();
     setupPower();
+    setupDebug();
 
     poll();
     loadMedia();

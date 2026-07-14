@@ -20,6 +20,10 @@ import threading
 import time
 from datetime import datetime
 
+from logsetup import get_logger
+
+log = get_logger("camera")
+
 # Longest-edge size for generated thumbnails (px).
 THUMBNAIL_SIZE = 400
 
@@ -28,10 +32,6 @@ PHOTOS = "photos"
 VIDEOS = "videos"
 TIMELAPSES = "timelapses"
 KINDS = (PHOTOS, VIDEOS, TIMELAPSES)
-
-
-def _log(msg):
-    print(f"[camera] {msg}", flush=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -51,7 +51,7 @@ def make_image_thumbnail(src, dst, size=THUMBNAIL_SIZE):
             img.save(dst, "JPEG", quality=75)
         return True
     except Exception as exc:  # noqa: BLE001 - never let a bad file break the app
-        _log(f"thumbnail failed for {src}: {exc}")
+        log.warning("thumbnail failed for %s: %s", src, exc)
         return False
 
 
@@ -97,7 +97,7 @@ class CameraController:
             os.makedirs(os.path.join(self.thumb_dir, kind), exist_ok=True)
 
         if self.mock:
-            _log("libcamera not found -> running in MOCK mode (placeholder media)")
+            log.info("libcamera not found -> running in MOCK mode (placeholder media)")
 
         self._recover()
 
@@ -114,6 +114,18 @@ class CameraController:
     def is_busy(self):
         with self._lock:
             return self._state.get("state") != "idle"
+
+    def diagnostics(self):
+        return {
+            "mock": self.mock,
+            "state": self._state.get("state"),
+            "tools": {
+                "libcamera-still": shutil.which("libcamera-still"),
+                "libcamera-vid": shutil.which("libcamera-vid"),
+                "ffmpeg": shutil.which("ffmpeg"),
+            },
+            "base_dir": self.base_dir,
+        }
 
     def start_photo(self):
         return self._start("photo")
@@ -135,7 +147,7 @@ class CameraController:
             try:
                 proc.send_signal(signal.SIGINT)
             except Exception as exc:  # noqa: BLE001
-                _log(f"stop failed: {exc}")
+                log.warning("stop failed: %s", exc)
         return self.status()
 
     # -- capture orchestration --------------------------------------------- #
@@ -189,11 +201,11 @@ class CameraController:
             if self.mock:
                 cmd = ["sleep", str(mock_seconds)]
 
-            _log(f"start {mode}: {' '.join(cmd)}")
+            log.info("start %s: %s", mode, " ".join(cmd))
             try:
                 self._proc = subprocess.Popen(cmd)
             except FileNotFoundError as exc:
-                _log(f"cannot start capture: {exc}")
+                log.error("cannot start capture: %s", exc)
                 self._proc = None
                 return self.status()
 
@@ -229,7 +241,7 @@ class CameraController:
                 self._convert_video(job)
             self._make_thumbnail(job)
         except Exception as exc:  # noqa: BLE001
-            _log(f"post-processing failed: {exc}")
+            log.exception("post-processing failed: %s", exc)
 
         with self._lock:
             if self._job is job:
@@ -237,7 +249,7 @@ class CameraController:
                 self._job = None
                 self._state = {"state": "idle"}
                 self._persist()
-        _log(f"finished {job['mode']}: {job['name']}")
+        log.info("finished %s: %s", job["mode"], job["name"])
 
     def _convert_video(self, job):
         subprocess.run(
@@ -283,7 +295,7 @@ class CameraController:
             self._state = {"state": "idle"}
             return
 
-        _log(f"recovering interrupted {saved.get('mode')} capture")
+        log.info("recovering interrupted %s capture", saved.get("mode"))
         try:
             mode = saved.get("mode")
             name = saved.get("name")
@@ -308,7 +320,7 @@ class CameraController:
                 if os.path.exists(job["file"]):
                     self._make_thumbnail(job)
         except Exception as exc:  # noqa: BLE001
-            _log(f"recovery cleanup failed: {exc}")
+            log.exception("recovery cleanup failed: %s", exc)
 
         self._state = {"state": "idle"}
         self._persist()
@@ -320,7 +332,7 @@ class CameraController:
             with open(self.state_file, "w") as fh:
                 json.dump(self._state, fh)
         except OSError as exc:
-            _log(f"could not persist state: {exc}")
+            log.warning("could not persist state: %s", exc)
 
     @staticmethod
     def _clamp(value, low, high):
